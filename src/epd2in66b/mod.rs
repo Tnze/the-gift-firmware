@@ -1,3 +1,4 @@
+use core::fmt::Debug;
 use core::marker::PhantomData;
 
 use embedded_hal::blocking::delay::DelayUs;
@@ -28,22 +29,20 @@ where
     CS: OutputPin,
     BUSY: InputPin,
     DC: OutputPin,
-    RST: OutputPin,
+    RST: OutputPin<Error: Debug>,
     DELAY: DelayUs<u8>,
 {
     fn init(&mut self, spi: &mut SPI, delay: &mut DELAY) -> Result<(), SPI::Error> {
         // hardware reset
-        let _ = self.rst.set_low();
+        self.rst.set_low().unwrap();
         delay.delay_us(200);
-        let _ = self.rst.set_high();
+        self.rst.set_high().unwrap();
         delay.delay_us(200);
         self.wait_for_busy_low();
 
         // software reset
         self.cmd(spi, Command::SWReset)?;
         self.wait_for_busy_low();
-
-        self.cmd(spi, Command::DeepSleepMode)?;
 
         Ok(())
     }
@@ -104,5 +103,9 @@ where
 
         let _ = self.cs.set_high();
         Ok(())
+    }
+
+    pub fn deep_sleep(&mut self, spi: &mut SPI) -> Result<(), SPI::Error> {
+        self.cmd(spi, Command::DeepSleepMode)
     }
 }

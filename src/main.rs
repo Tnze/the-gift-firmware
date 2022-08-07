@@ -1,5 +1,8 @@
 #![no_std]
 #![no_main]
+#![feature(associated_type_bounds)]
+
+use core::panic::PanicInfo;
 
 use embedded_hal::spi::MODE_0;
 use gd32vf103xx_hal::gpio::State;
@@ -10,21 +13,16 @@ use longan_nano::hal::delay::McycleDelay;
 use longan_nano::hal::{pac, prelude::*};
 use longan_nano::sprintln;
 
-extern crate alloc;
-use alloc::boxed::Box;
+#[panic_handler]
+fn panic_handler(info: &PanicInfo) -> ! {
+    sprintln!("Panic: {}", info);
+    loop {}
+}
 
 mod epd2in66b;
-mod panic_blinky;
-
-use core::ptr::NonNull;
-use palloc::{GlobalPalloc, SpinPalloc};
-#[global_allocator]
-static mut ALLOCATOR: SpinPalloc = SpinPalloc::empty();
 
 #[entry]
 fn main() -> ! {
-    unsafe { ALLOCATOR.init(NonNull::new(0x2000_0000 as *mut u8).unwrap(), 0x1FFF_FFFF) };
-
     let dp = pac::Peripherals::take().unwrap();
     let mut rcu = dp.RCU.configure().freeze();
 
@@ -58,12 +56,6 @@ fn main() -> ! {
         &mut rcu,
     );
 
-    let a = 0;
-    sprintln!("pointer: {:p}", &a);
-    // let a = Box::new(a);
-    // sprintln!("pointer: {:p}", a.as_mut());
-    loop {}
-
     delay.delay_ms(10);
     let mut epd = epd2in66b::Display::new(
         &mut spi1,
@@ -75,6 +67,7 @@ fn main() -> ! {
     )
     .unwrap();
     epd.clear_frame(&mut spi1).unwrap();
+    epd.deep_sleep(&mut spi1).unwrap();
     // Red - DC
     // Green - BUSY
     // Blue - RST
