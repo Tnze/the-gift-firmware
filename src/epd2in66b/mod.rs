@@ -1,14 +1,16 @@
 use core::fmt::Debug;
 use core::marker::PhantomData;
 
+use embedded_graphics::prelude::{DrawTarget, OriginDimensions, Pixel, PixelColor, Size};
 use embedded_hal::blocking::delay::DelayUs;
 use embedded_hal::blocking::spi::Write;
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
 mod command;
 use command::Command;
+pub use command::{DeepSleepMode, DisplayRamOption, SourceOutputMode};
 
-pub struct Display<SPI, CS, BUSY, DC, RST, DELAY> {
+pub struct Epd2in66bDisplay<SPI, CS, BUSY, DC, RST, DELAY> {
     /// SPI
     _spi: PhantomData<SPI>,
     /// DELAY
@@ -23,11 +25,11 @@ pub struct Display<SPI, CS, BUSY, DC, RST, DELAY> {
     rst: RST,
 }
 
-impl<SPI, CS, BUSY, DC, RST, DELAY> Display<SPI, CS, BUSY, DC, RST, DELAY>
+impl<SPI, CS, BUSY, DC, RST, DELAY> Epd2in66bDisplay<SPI, CS, BUSY, DC, RST, DELAY>
 where
     SPI: Write<u8>,
     CS: OutputPin,
-    BUSY: InputPin,
+    BUSY: InputPin<Error: Debug>,
     DC: OutputPin,
     RST: OutputPin<Error: Debug>,
     DELAY: DelayUs<u8>,
@@ -69,7 +71,7 @@ where
     }
 
     fn wait_for_busy_low(&self) {
-        while let Ok(true) = self.busy.is_high() {}
+        while self.busy.is_high().unwrap() {}
     }
 
     fn cmd(&mut self, spi: &mut SPI, cmd: Command) -> Result<(), SPI::Error> {
@@ -91,21 +93,102 @@ where
         let _ = self.cs.set_low();
 
         self.cmd(spi, Command::WriteRAMBlackWhite)?;
-        // self.data(spi, include_bytes!("picture.out"))?;
         self.data(spi, &[0xFF; 5624])?;
 
         self.cmd(spi, Command::WriteRAMRed)?;
         self.data(spi, &[0x00; 5624])?;
-        // self.data(spi, include_bytes!("pictureR.out"))?;
-
-        self.cmd(spi, Command::MasterActivation)?;
-        self.wait_for_busy_low();
 
         let _ = self.cs.set_high();
         Ok(())
     }
 
-    pub fn deep_sleep(&mut self, spi: &mut SPI) -> Result<(), SPI::Error> {
-        self.cmd(spi, Command::DeepSleepMode)
+    pub fn activate(&mut self, spi: &mut SPI) -> Result<(), SPI::Error> {
+        self.cmd(spi, Command::MasterActivation)?;
+        self.wait_for_busy_low();
+        Ok(())
     }
+
+    pub fn display_update_control_1(
+        &mut self,
+        spi: &mut SPI,
+        red: DisplayRamOption,
+        black_white: DisplayRamOption,
+        output_mode: SourceOutputMode,
+    ) -> Result<(), SPI::Error> {
+        self.cmd(spi, Command::DisplayUpdateControl1)?;
+        self.data(
+            spi,
+            &[
+                (red as u8) << 4 | black_white as u8 & 0xF,
+                (output_mode as u8) << 7,
+            ],
+        )
+    }
+
+    // pub fn test(&mut self, spi: &mut SPI) -> Result<(), SPI::Error> {
+    //     self.display_update_control_1(
+    //         spi,
+    //         DisplayRamOption::Normal,
+    //         DisplayRamOption::Normal,
+    //         SourceOutputMode::S0ToS175,
+    //     )?;
+
+    //     self.cmd(spi, Command::WriteRAMBlackWhite)?;
+    //     self.data(spi, include_bytes!("picture.out"))?;
+    //     self.cmd(spi, Command::WriteRAMRed)?;
+    //     self.data(spi, include_bytes!("pictureR.out"))?;
+    //     Ok(())
+    // }
+
+    pub fn deep_sleep(&mut self, spi: &mut SPI, mode: DeepSleepMode) -> Result<(), SPI::Error> {
+        self.cmd(spi, Command::DeepSleepMode)?;
+        self.data(spi, &[mode as u8])
+    }
+}
+
+impl<SPI, CS, BUSY, DC, RST, DELAY> DrawTarget for Epd2in66bDisplay<SPI, CS, BUSY, DC, RST, DELAY>
+where
+    SPI: Write<u8>,
+    CS: OutputPin,
+    BUSY: InputPin,
+    DC: OutputPin,
+    RST: OutputPin<Error: Debug>,
+    DELAY: DelayUs<u8>,
+{
+    type Color = Color;
+
+    type Error = SPI::Error;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        for Pixel(point, color) in pixels.into_iter() {
+            match color {
+                Color::White => todo!(),
+                Color::Black => todo!(),
+                Color::Red => todo!(),
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<SPI, CS, BUSY, DC, RST, DELAY> OriginDimensions
+    for Epd2in66bDisplay<SPI, CS, BUSY, DC, RST, DELAY>
+{
+    fn size(&self) -> Size {
+        Size::new(296, 152)
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum Color {
+    White,
+    Black,
+    Red,
+}
+
+impl PixelColor for Color {
+    type Raw = ();
 }

@@ -56,7 +56,7 @@ pub enum DeepSleepMode {
 }
 
 #[allow(dead_code, clippy::enum_variant_names)]
-pub(crate) enum DataEntryModeIncr {
+pub enum DataEntryModeIncr {
     XDecrYDecr = 0x0,
     XIncrYDecr = 0x1,
     XDecrYIncr = 0x2,
@@ -64,20 +64,20 @@ pub(crate) enum DataEntryModeIncr {
 }
 
 #[allow(dead_code)]
-pub(crate) enum DataEntryModeDir {
+pub enum DataEntryModeDir {
     XDir = 0x0,
     YDir = 0x4,
 }
 
 #[allow(dead_code)]
-pub(crate) enum DisplayUpdateRamOption {
+pub enum DisplayRamOption {
     Normal = 0b0000,
-    BypassRamContentAs0 = 0b0100,
-    InverseRamContent = 0b1000,
+    Bypass = 0b0100,
+    Inverse = 0b1000,
 }
 
 #[allow(dead_code)]
-pub(crate) enum SourceOutputMode {
+pub enum SourceOutputMode {
     S0ToS175 = 0,
     S8ToS167 = 1,
 }

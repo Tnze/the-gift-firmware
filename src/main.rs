@@ -4,8 +4,9 @@
 
 use core::panic::PanicInfo;
 
+use ec01f::EC01F;
 use embedded_hal::spi::MODE_0;
-use gd32vf103xx_hal::gpio::State;
+use gd32vf103xx_hal::serial::{Serial, Config, Parity, StopBits};
 use gd32vf103xx_hal::spi::Spi;
 use riscv_rt::entry;
 
@@ -13,16 +14,20 @@ use longan_nano::hal::delay::McycleDelay;
 use longan_nano::hal::{pac, prelude::*};
 use longan_nano::sprintln;
 
+mod ec01f;
+mod epd2in66b;
+
+use epd2in66b::{DeepSleepMode, Epd2in66bDisplay};
+
 #[panic_handler]
 fn panic_handler(info: &PanicInfo) -> ! {
     sprintln!("Panic: {}", info);
     loop {}
 }
 
-mod epd2in66b;
-
 #[entry]
 fn main() -> ! {
+    // 国家授时中心 ntp.ntsc.ac.cn
     let dp = pac::Peripherals::take().unwrap();
     let mut rcu = dp.RCU.configure().freeze();
 
@@ -35,10 +40,27 @@ fn main() -> ! {
         gpioa.pa9,
         gpioa.pa10,
         9600.bps(),
-        // 921_600.bps(),
         &mut afio,
         &mut rcu,
     );
+    sprintln!("program started");
+
+    let mut serial1 = Serial::new(
+        dp.USART1,
+        (
+            gpioa.pa2.into_push_pull_output(),
+            gpioa.pa3.into_floating_input(),
+        ),
+        Config{
+            baudrate: 9600.bps(),
+            parity: Parity::ParityNone,
+            stopbits: StopBits::STOP1
+        },
+        &mut afio,
+        &mut rcu,
+    );
+    let (tx, rx) = serial1.split();
+    let mut ec01f = EC01F::new(tx, rx);
 
     let mut delay = McycleDelay::new(&rcu.clocks);
 
@@ -57,17 +79,19 @@ fn main() -> ! {
     );
 
     delay.delay_ms(10);
-    let mut epd = epd2in66b::Display::new(
+    let mut epd = Epd2in66bDisplay::new(
         &mut spi1,
-        gpioa.pa4.into_push_pull_output_with_state(State::High),
-        gpioa.pa1.into_floating_input(),
+        gpioa.pa4.into_push_pull_output(),
+        gpioa.pa0.into_floating_input(),
         gpioc.pc13.into_push_pull_output(),
-        gpioa.pa2.into_push_pull_output(),
+        gpioa.pa1.into_push_pull_output(),
         &mut delay,
     )
     .unwrap();
     epd.clear_frame(&mut spi1).unwrap();
-    epd.deep_sleep(&mut spi1).unwrap();
+    // epd.test(&mut spi1).unwrap();
+    epd.activate(&mut spi1).unwrap();
+    epd.deep_sleep(&mut spi1, DeepSleepMode::Normal).unwrap();
     // Red - DC
     // Green - BUSY
     // Blue - RST
