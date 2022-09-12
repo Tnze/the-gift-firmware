@@ -1,12 +1,13 @@
 #![no_std]
 #![no_main]
-#![feature(associated_type_bounds)]
+#![feature(associated_type_bounds, type_alias_impl_trait)]
 
 use core::panic::PanicInfo;
 
 use ec01f::EC01F;
+use embassy_executor::Executor;
 use embedded_hal::spi::MODE_0;
-use gd32vf103xx_hal::serial::{Serial, Config, Parity, StopBits};
+use gd32vf103xx_hal::serial::{Config, Parity, Serial, StopBits};
 use gd32vf103xx_hal::spi::Spi;
 use riscv_rt::entry;
 
@@ -27,6 +28,13 @@ fn panic_handler(info: &PanicInfo) -> ! {
 
 #[entry]
 fn main() -> ! {
+    let mut executor = embassy_executor::Executor::new();
+    let executor: &'static mut Executor = unsafe { core::mem::transmute(&mut executor) };
+    executor.run(|spawner| spawner.must_spawn(asnyc_main()));
+}
+
+#[embassy_executor::task]
+async fn asnyc_main() {
     // 国家授时中心 ntp.ntsc.ac.cn
     let dp = pac::Peripherals::take().unwrap();
     let mut rcu = dp.RCU.configure().freeze();
@@ -43,24 +51,29 @@ fn main() -> ! {
         &mut afio,
         &mut rcu,
     );
-    sprintln!("program started");
+    sprintln!("system boot");
 
-    let mut serial1 = Serial::new(
-        dp.USART1,
-        (
-            gpioa.pa2.into_push_pull_output(),
-            gpioa.pa3.into_floating_input(),
-        ),
-        Config{
-            baudrate: 9600.bps(),
-            parity: Parity::ParityNone,
-            stopbits: StopBits::STOP1
-        },
-        &mut afio,
-        &mut rcu,
-    );
-    let (tx, rx) = serial1.split();
-    let mut ec01f = EC01F::new(tx, rx);
+    // let mut serial1 = Serial::new(
+    //     dp.USART1,
+    //     (
+    //         gpioa.pa2.into_push_pull_output(),
+    //         gpioa.pa3.into_floating_input(),
+    //     ),
+    //     Config{
+    //         baudrate: 9600.bps(),
+    //         parity: Parity::ParityNone,
+    //         stopbits: StopBits::STOP1
+    //     },
+    //     &mut afio,
+    //     &mut rcu,
+    // );
+
+    // let (tx, rx) = serial1.split();
+    // let mut ec01f = EC01F::new(tx, rx).unwrap();
+    // {
+    //     let coapClient = ec01f.create_coap();
+
+    // }
 
     let mut delay = McycleDelay::new(&rcu.clocks);
 
@@ -96,4 +109,27 @@ fn main() -> ! {
     // Green - BUSY
     // Blue - RST
     loop {}
+}
+
+mod critical_section_impl {
+    use riscv::{
+        interrupt::{disable, enable},
+        register::mstatus,
+    };
+
+    struct GD32VF103CriticalSection;
+    critical_section::set_impl!(GD32VF103CriticalSection);
+    unsafe impl critical_section::Impl for GD32VF103CriticalSection {
+        unsafe fn acquire() -> critical_section::RawRestoreState {
+            let mstatus = mstatus::read();
+            disable();
+            mstatus.mie()
+        }
+
+        unsafe fn release(restore_state: critical_section::RawRestoreState) {
+            if restore_state {
+                enable();
+            }
+        }
+    }
 }

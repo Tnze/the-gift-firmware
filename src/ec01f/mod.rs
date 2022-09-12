@@ -1,10 +1,10 @@
+use core::fmt::{self, Debug};
 use core::str::from_utf8;
-
 use embedded_hal::serial::{Read, Write};
 use longan_nano::sprintln;
 use nb::block;
 
-use self::at::Response;
+use self::at::{Device, Response};
 
 mod coap;
 
@@ -22,6 +22,19 @@ pub enum Error<TX: Write<u8>, RX: Read<u8>> {
     ParseErr,    // 响应解析错误
 }
 
+impl<TX: Write<u8>, RX: Read<u8>> Debug for Error<TX, RX> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TxError(_) => write!(f, "TxError"),
+            Self::RxError(_) => write!(f, "RxError"),
+            Self::Timeout => write!(f, "Timeout"),
+            Self::BufferFull => write!(f, "BufferFull"),
+            Self::InvalidUTF8 => write!(f, "InvalidUTF8"),
+            Self::ParseErr => write!(f, "ParseErr"),
+        }
+    }
+}
+
 impl<TX, RX> EC01F<TX, RX>
 where
     TX: Write<u8>,
@@ -29,23 +42,9 @@ where
 {
     pub fn new(tx: TX, rx: RX) -> nb::Result<Self, Error<TX, RX>> {
         let mut ec01f = Self { tx, rx };
-        ec01f.check()?;
+        ec01f.write_cmd(format_args!("ATE0"))?; // 禁用命令回显
+        ec01f.read_ok()?;
         Ok(ec01f)
-    }
-
-    fn check(&mut self) -> Result<(), Error<TX, RX>> {
-        self.write_cmd("AT")?;
-        while !matches!(self.read_resp()?, Response::Ok) {}
-
-        Ok(())
-        // self.write_cmd("ATQ1") // 抑制PING/IPERF/LWM2M主动上报的内容
-    }
-
-    fn write_cmd(&mut self, s: &str) -> Result<(), Error<TX, RX>> {
-        for byte in s.as_bytes().iter().chain(b"\r") {
-            block!(self.tx.write(*byte)).map_err(|e| Error::TxError(e))?;
-        }
-        Ok(())
     }
 
     fn read_byte(&mut self) -> Result<u8, Error<TX, RX>> {
@@ -67,6 +66,37 @@ where
         }
     }
 
+    pub fn create_coap(&mut self) -> coap::CoAPClient<'_, Self> {
+        coap::CoAPClient::new(self)
+    }
+}
+
+impl<TX, RX> fmt::Write for EC01F<TX, RX>
+where
+    TX: Write<u8>,
+    RX: Read<u8>,
+{
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        s.as_bytes()
+            .iter()
+            .try_for_each(|c| nb::block!(self.tx.write(*c)))
+            .map_err(|_| core::fmt::Error)
+    }
+}
+
+impl<TX, RX> at::Device for EC01F<TX, RX>
+where
+    TX: Write<u8>,
+    RX: Read<u8>,
+{
+    type Error = Error<TX, RX>;
+
+    fn write_cmd(&mut self, args: fmt::Arguments) -> Result<(), Error<TX, RX>> {
+        fmt::Write::write_fmt(self, args).unwrap();
+        fmt::Write::write_char(self, '\n').unwrap();
+        Ok(())
+    }
+
     fn read_resp(&mut self) -> Result<Response, Error<TX, RX>> {
         let mut buffer = heapless::Vec::<u8, 1024>::new();
         loop {
@@ -83,14 +113,10 @@ where
             };
         }
     }
-
-    fn skip_line(&mut self) -> Result<(), RX::Error> {
-        while block!(self.rx.read())? != b'\n' {}
-        Ok(())
-    }
 }
 
 mod at {
+    use core::fmt;
     use nom::{
         branch::alt,
         bytes::complete::tag,
@@ -99,6 +125,16 @@ mod at {
         sequence::tuple,
         IResult,
     };
+
+    pub trait Device {
+        type Error;
+        fn write_cmd(&mut self, args: fmt::Arguments) -> Result<(), Self::Error>;
+        fn read_resp(&mut self) -> Result<Response, Self::Error>;
+        fn read_ok(&mut self) -> Result<(), Self::Error> {
+            while !matches!(self.read_resp()?, Response::Ok) {}
+            Ok(())
+        }
+    }
 
     #[derive(Clone)]
     pub enum Response {
