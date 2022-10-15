@@ -9,4 +9,3 @@ set confirm off
 set backtrace limit 32
 
 load
-continue
